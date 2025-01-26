@@ -1,4 +1,3 @@
-use std::fmt::Write;
 use std::time::{Duration, Instant};
 
 use esp_idf_svc::hal::delay::FreeRtos;
@@ -9,6 +8,7 @@ use esp_idf_svc::hal::uart::{self, Uart, UartDriver};
 
 use anyhow::Result;
 use esp_idf_svc::hal::units::Hertz;
+use esp_idf_svc::sys::EspError;
 
 #[derive(thiserror::Error, Debug)]
 enum Hc12Error {
@@ -155,7 +155,7 @@ impl<'d, 'h> Command<'d, 'h> {
         let mut buffer = [0u8; 14];
         self.hc_12.driver.clear_rx()?;
 
-        self.hc_12.driver.write_str(command)?;
+        self.hc_12.driver.write(command.as_bytes())?;
         FreeRtos::delay_ms(200);
 
         let bytes_read = self.hc_12.driver.read(&mut buffer, 200)?;
@@ -282,5 +282,13 @@ impl<'d> Hc12<'d> {
 
     pub fn command<'h>(&'h mut self) -> Result<Command<'d, 'h>> {
         Command::new(self)
+    }
+
+    pub fn read(&self, buf: &mut [u8], timeout: u32) -> Result<usize, EspError> {
+        self.driver.read(buf, timeout)
+    }
+
+    pub fn write(&self, buf: &[u8]) -> Result<usize, EspError> {
+        self.driver.write(buf)
     }
 }
