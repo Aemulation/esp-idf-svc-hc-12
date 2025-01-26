@@ -1,10 +1,8 @@
 use esp_idf_svc::hal::delay::FreeRtos;
-use esp_idf_svc::hal::gpio::AnyIOPin;
-use esp_idf_svc::hal::uart;
 use esp_idf_svc::hal::{peripheral::Peripheral, prelude::Peripherals};
 
 use anyhow::Result;
-use hc_12::{Baudrate, TransmissionMode};
+use hc_12::{BaudRate, TransmissionMode};
 
 mod hc_12;
 
@@ -26,35 +24,69 @@ fn main() -> Result<()> {
 
     let mut hc_12 = hc_12::Hc12::new(uart1, pin17, pin16, pin4.map_into(), None)?;
 
+    log::info!("Resetting the hc-12");
+    hc_12.command()?.set_default()?;
+
+    let baud = hc_12.command()?.auto_baud()?;
+    log::info!("Baud rate set to: {} ", u32::from(baud));
+
     for i in 0..10 {
-        match hc_12.test() {
+        match hc_12.command()?.test() {
             Ok(_) => log::info!("test {i}: success"),
-            Err(_) => log::error!("test {i}: ERROR"),
+            error @ Err(_) => {
+                log::error!("test {i}: ERROR");
+                error?;
+            }
         }
     }
 
-    // let baud_rate1 = Baudrate::Baud115200;
-    // log::info!("Setting baudrate to {}", u32::from(&baud_rate1));
-    // hc_12.set_baud(&baud_rate1)?;
-    //
-    // let baud_rate2 = Baudrate::Baud9600;
-    // log::info!("Setting baudrate to {}", u32::from(&baud_rate2));
-    // hc_12.set_baud(&baud_rate2)?;
+    for baud_rate in [
+        BaudRate::Baud1200,
+        BaudRate::Baud2400,
+        BaudRate::Baud4800,
+        BaudRate::Baud9600,
+        BaudRate::Baud19200,
+        BaudRate::Baud38400,
+        BaudRate::Baud57600,
+        BaudRate::Baud115200,
+    ] {
+        log::info!("Setting baudrate to {}", u32::from(&baud_rate));
+        hc_12.command()?.set_baud(&baud_rate)?;
+
+        FreeRtos::delay_ms(200);
+        hc_12.command()?.test()?;
+
+        FreeRtos::delay_ms(100);
+    }
+
+    hc_12.command()?.test()?;
+
+    FreeRtos::delay_ms(1_000);
 
     log::info!("Setting transmission mode to FU1");
-    hc_12.set_transmission_mode(&TransmissionMode::Fu1)?;
+    hc_12
+        .command()?
+        .set_transmission_mode(&TransmissionMode::Fu1)?;
     FreeRtos::delay_ms(10_000);
 
     log::info!("Setting transmission mode to FU2");
-    hc_12.set_transmission_mode(&TransmissionMode::Fu2)?;
+    hc_12
+        .command()?
+        .set_transmission_mode(&TransmissionMode::Fu2)?;
     FreeRtos::delay_ms(10_000);
 
+    hc_12.command()?.test()?;
+
     log::info!("Setting transmission mode to FU3");
-    hc_12.set_transmission_mode(&TransmissionMode::Fu3)?;
+    hc_12
+        .command()?
+        .set_transmission_mode(&TransmissionMode::Fu3)?;
     FreeRtos::delay_ms(10_000);
 
     log::info!("Setting transmission mode to FU4");
-    hc_12.set_transmission_mode(&TransmissionMode::Fu4)?;
+    hc_12
+        .command()?
+        .set_transmission_mode(&TransmissionMode::Fu4)?;
     FreeRtos::delay_ms(10_000);
 
     Ok(())

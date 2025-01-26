@@ -16,8 +16,13 @@ enum Hc12Error {
     Test,
     #[error("Failed to set the requested baud rate")]
     BaudRate,
+    #[error("Failed to automatically set the baud rate")]
+    AutoBaudRate,
     #[error("Failed to set the requested transmission mode")]
     TransmissionMode,
+
+    #[error("Failed reset")]
+    Default,
 }
 
 pub enum TransmissionMode {
@@ -49,8 +54,8 @@ impl From<TransmissionMode> for u32 {
     }
 }
 
-#[derive(Default)]
-pub enum Baudrate {
+#[derive(Default, Clone, Copy)]
+pub enum BaudRate {
     Baud1200,
     Baud2400,
     Baud4800,
@@ -62,60 +67,171 @@ pub enum Baudrate {
     Baud115200,
 }
 
-impl From<&Baudrate> for &str {
-    fn from(value: &Baudrate) -> Self {
+impl From<&BaudRate> for &str {
+    fn from(value: &BaudRate) -> Self {
         match value {
-            Baudrate::Baud1200 => "1200",
-            Baudrate::Baud2400 => "2400",
-            Baudrate::Baud4800 => "4800",
-            Baudrate::Baud9600 => "9600",
-            Baudrate::Baud19200 => "19200",
-            Baudrate::Baud38400 => "38400",
-            Baudrate::Baud57600 => "57600",
-            Baudrate::Baud115200 => "115200",
+            BaudRate::Baud1200 => "1200",
+            BaudRate::Baud2400 => "2400",
+            BaudRate::Baud4800 => "4800",
+            BaudRate::Baud9600 => "9600",
+            BaudRate::Baud19200 => "19200",
+            BaudRate::Baud38400 => "38400",
+            BaudRate::Baud57600 => "57600",
+            BaudRate::Baud115200 => "115200",
         }
     }
 }
 
-impl From<Baudrate> for u32 {
-    fn from(baud_rate: Baudrate) -> Self {
+impl From<BaudRate> for u32 {
+    fn from(baud_rate: BaudRate) -> Self {
         match baud_rate {
-            Baudrate::Baud1200 => 1200,
-            Baudrate::Baud2400 => 2400,
-            Baudrate::Baud4800 => 4800,
-            Baudrate::Baud9600 => 9600,
-            Baudrate::Baud19200 => 19200,
-            Baudrate::Baud38400 => 38400,
-            Baudrate::Baud57600 => 57600,
-            Baudrate::Baud115200 => 115200,
+            BaudRate::Baud1200 => 1200,
+            BaudRate::Baud2400 => 2400,
+            BaudRate::Baud4800 => 4800,
+            BaudRate::Baud9600 => 9600,
+            BaudRate::Baud19200 => 19200,
+            BaudRate::Baud38400 => 38400,
+            BaudRate::Baud57600 => 57600,
+            BaudRate::Baud115200 => 115200,
         }
     }
 }
 
-impl From<&Baudrate> for u32 {
-    fn from(baud_rate: &Baudrate) -> Self {
+impl From<&BaudRate> for u32 {
+    fn from(baud_rate: &BaudRate) -> Self {
         match baud_rate {
-            Baudrate::Baud1200 => 1200,
-            Baudrate::Baud2400 => 2400,
-            Baudrate::Baud4800 => 4800,
-            Baudrate::Baud9600 => 9600,
-            Baudrate::Baud19200 => 19200,
-            Baudrate::Baud38400 => 38400,
-            Baudrate::Baud57600 => 57600,
-            Baudrate::Baud115200 => 115200,
+            BaudRate::Baud1200 => 1200,
+            BaudRate::Baud2400 => 2400,
+            BaudRate::Baud4800 => 4800,
+            BaudRate::Baud9600 => 9600,
+            BaudRate::Baud19200 => 19200,
+            BaudRate::Baud38400 => 38400,
+            BaudRate::Baud57600 => 57600,
+            BaudRate::Baud115200 => 115200,
         }
     }
 }
 
-impl From<Baudrate> for Hertz {
-    fn from(baud_rate: Baudrate) -> Self {
+impl From<BaudRate> for Hertz {
+    fn from(baud_rate: BaudRate) -> Self {
         u32::from(baud_rate).into()
     }
 }
 
-impl From<&Baudrate> for Hertz {
-    fn from(baud_rate: &Baudrate) -> Self {
+impl From<&BaudRate> for Hertz {
+    fn from(baud_rate: &BaudRate) -> Self {
         u32::from(baud_rate).into()
+    }
+}
+
+pub struct Command<'d, 'h> {
+    hc_12: &'h mut Hc12<'d>,
+}
+
+impl Drop for Command<'_, '_> {
+    fn drop(&mut self) {
+        self.hc_12
+            .set
+            .set_high()
+            .expect("Could not exit command mode");
+        self.hc_12.last_command_exit = Instant::now();
+    }
+}
+
+impl<'d, 'h> Command<'d, 'h> {
+    fn new(hc_12: &'h mut Hc12<'d>) -> Result<Self> {
+        if let Some(time_to_wait) =
+            Duration::from_millis(201).checked_sub(hc_12.last_command_exit.elapsed())
+        {
+            FreeRtos::delay_ms(time_to_wait.as_millis() as u32);
+        }
+        hc_12.set.set_low()?;
+        FreeRtos::delay_ms(200);
+
+        Ok(Self { hc_12 })
+    }
+
+    fn send_command(&mut self, command: &str) -> Result<String> {
+        let mut buffer = [0u8; 14];
+        self.hc_12.driver.clear_rx()?;
+
+        self.hc_12.driver.write_str(command)?;
+        FreeRtos::delay_ms(200);
+
+        let bytes_read = self.hc_12.driver.read(&mut buffer, 200)?;
+
+        Ok(String::from_utf8_lossy(&buffer[..bytes_read]).into_owned())
+    }
+
+    pub fn test(&mut self) -> Result<()> {
+        let result = self.send_command("AT")?;
+        if result != "OK\r\n" {
+            return Err(Hc12Error::Test.into());
+        }
+
+        Ok(())
+    }
+
+    pub fn auto_baud(&mut self) -> Result<BaudRate> {
+        for baud_rate in [
+            BaudRate::Baud1200,
+            BaudRate::Baud2400,
+            BaudRate::Baud4800,
+            BaudRate::Baud9600,
+            BaudRate::Baud19200,
+            BaudRate::Baud38400,
+            BaudRate::Baud57600,
+            BaudRate::Baud115200,
+        ] {
+            self.hc_12.driver.change_baudrate(u32::from(baud_rate))?;
+
+            if self.test().is_ok() {
+                return Ok(baud_rate);
+            }
+        }
+
+        Err(Hc12Error::AutoBaudRate.into())
+    }
+
+    pub fn set_baud(mut self, baud_rate: &BaudRate) -> Result<()> {
+        let command = format!("AT+B{}", u32::from(baud_rate));
+        let result = self.send_command(&command)?;
+
+        if result != format!("OK+B{}\r\n", u32::from(baud_rate)) {
+            return Err(Hc12Error::BaudRate.into());
+        }
+
+        self.hc_12.driver.change_baudrate(u32::from(baud_rate))?;
+
+        Ok(())
+    }
+
+    pub fn set_transmission_mode(mut self, transmission_mode: &TransmissionMode) -> Result<()> {
+        let command = format!("AT+FU{}", u32::from(transmission_mode));
+        let result = self.send_command(&command)?;
+
+        if !result.contains(&format!("OK+FU{}", u32::from(transmission_mode))) {
+            return Err(Hc12Error::TransmissionMode.into());
+        }
+
+        if let Some(new_baud_rate) = result.split(",").nth(1) {
+            let new_baud_rate = new_baud_rate[1..].trim();
+            self.hc_12
+                .driver
+                .change_baudrate(str::parse::<u32>(new_baud_rate)?)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn set_default(&mut self) -> Result<()> {
+        let result = self.send_command("AT+DEFAULT")?;
+
+        if result != ("OK+DEFAULT\r\n") {
+            return Err(Hc12Error::Default.into());
+        }
+
+        Ok(())
     }
 }
 
@@ -132,9 +248,9 @@ impl<'d> Hc12<'d> {
         tx: impl Peripheral<P = impl OutputPin> + 'd,
         rx: impl Peripheral<P = impl InputPin> + 'd,
         set: PeripheralRef<'d, AnyOutputPin>,
-        baud_rate: Option<Baudrate>,
+        baud_rate: Option<BaudRate>,
     ) -> Result<Self> {
-        let uart_config = uart::config::Config::default().baudrate(Baudrate::Baud9600.into());
+        let uart_config = uart::config::Config::default().baudrate(BaudRate::Baud9600.into());
 
         let driver = uart::UartDriver::new(
             uart,
@@ -158,92 +274,13 @@ impl<'d> Hc12<'d> {
         if let Some(baud_rate) = &baud_rate {
             hc_12.driver.change_baudrate(baud_rate)?;
         } else {
-            hc_12.determine_baud()?;
+            hc_12.command()?.auto_baud()?;
         }
 
         Ok(hc_12)
     }
 
-    fn send_command(&mut self, command: &str) -> Result<String> {
-        if let Some(time_to_wait) =
-            Duration::from_millis(200).checked_sub(self.last_command_exit.elapsed())
-        {
-            FreeRtos::delay_ms(time_to_wait.as_millis() as u32);
-        }
-
-        let mut buffer = [0u8; 12];
-        let bytes_read = (|| -> Result<usize> {
-            self.set.set_low()?;
-            self.driver.clear_rx()?;
-            FreeRtos::delay_ms(80);
-
-            self.driver.write_str(command)?;
-            FreeRtos::delay_ms(80);
-            let bytes_read = self.driver.read(&mut buffer, 200)?;
-            self.set.set_high()?;
-            Ok(bytes_read)
-        })();
-
-        self.last_command_exit = Instant::now();
-        let bytes_read = bytes_read?;
-
-        eprintln!("raw buffer: {:?}", &buffer[0..bytes_read]);
-
-        Ok(String::from_utf8_lossy(&buffer[..bytes_read]).into_owned())
-    }
-
-    pub fn determine_baud(&mut self) -> Result<Baudrate> {
-        for baud_rate in [
-            Baudrate::Baud1200,
-            Baudrate::Baud2400,
-            Baudrate::Baud4800,
-            Baudrate::Baud9600,
-            Baudrate::Baud19200,
-            Baudrate::Baud38400,
-            Baudrate::Baud57600,
-            Baudrate::Baud115200,
-        ] {
-            eprintln!("Testing baud: {}", u32::from(&baud_rate));
-            self.driver.change_baudrate(u32::from(&baud_rate))?;
-            if self.test().is_ok() {
-                return Ok(baud_rate);
-            }
-        }
-
-        Err(Hc12Error::BaudRate.into())
-    }
-
-    pub fn test(&mut self) -> Result<()> {
-        let result = self.send_command("AT")?;
-        if result != "OK\r\n" {
-            return Err(Hc12Error::Test.into());
-        }
-
-        Ok(())
-    }
-
-    pub fn set_baud(&mut self, baud_rate: &Baudrate) -> Result<()> {
-        let command = format!("AT+B{}", u32::from(baud_rate));
-        let result = self.send_command(&command)?;
-
-        eprintln!("Result: {result}");
-        if result != format!("OK+B{}\r\n", u32::from(baud_rate)) {
-            return Err(Hc12Error::BaudRate.into());
-        }
-
-        self.driver.change_baudrate(u32::from(baud_rate))?;
-
-        Ok(())
-    }
-
-    pub fn set_transmission_mode(&mut self, transmission_mode: &TransmissionMode) -> Result<()> {
-        let command = format!("AT+FU{}", u32::from(transmission_mode));
-        let result = self.send_command(&command)?;
-
-        if result != format!("OK+FU{}\r\n", u32::from(transmission_mode)) {
-            return Err(Hc12Error::TransmissionMode.into());
-        }
-
-        Ok(())
+    pub fn command<'h>(&'h mut self) -> Result<Command<'d, 'h>> {
+        Command::new(self)
     }
 }
