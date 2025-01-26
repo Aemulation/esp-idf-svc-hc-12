@@ -155,10 +155,10 @@ impl<'d, 'h> Command<'d, 'h> {
         let mut buffer = [0u8; 14];
         self.hc_12.driver.clear_rx()?;
 
-        self.hc_12.driver.write(command.as_bytes())?;
+        self.hc_12.write(command.as_bytes())?;
         FreeRtos::delay_ms(200);
 
-        let bytes_read = self.hc_12.driver.read(&mut buffer, 200)?;
+        let bytes_read = self.hc_12.read(&mut buffer, 200)?;
 
         Ok(String::from_utf8_lossy(&buffer[..bytes_read]).into_owned())
     }
