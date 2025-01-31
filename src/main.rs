@@ -22,7 +22,7 @@ fn main() -> Result<()> {
 
     log::info!("Hello, world!");
 
-    let mut hc_12 = hc_12::Hc12::new(uart1, pin17, pin16, pin4.map_into(), None)?;
+    let mut hc_12 = hc_12::Hc12::new(uart1, pin17, pin16, pin4, None)?;
 
     log::info!("Resetting the hc-12");
     hc_12.command()?.set_default()?;

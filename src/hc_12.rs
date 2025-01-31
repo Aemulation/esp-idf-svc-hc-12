@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::gpio::{AnyIOPin, AnyOutputPin, InputPin, Output, OutputPin, PinDriver};
 use esp_idf_svc::hal::peripheral::Peripheral;
-use esp_idf_svc::hal::peripheral::PeripheralRef;
 use esp_idf_svc::hal::uart::{self, Uart, UartDriver};
 
 use anyhow::Result;
@@ -247,7 +246,7 @@ impl<'d> Hc12<'d> {
         uart: impl Peripheral<P = impl Uart> + 'd,
         tx: impl Peripheral<P = impl OutputPin> + 'd,
         rx: impl Peripheral<P = impl InputPin> + 'd,
-        set: PeripheralRef<'d, AnyOutputPin>,
+        set: impl Peripheral<P = impl OutputPin> + 'd,
         baud_rate: Option<BaudRate>,
     ) -> Result<Self> {
         let uart_config = uart::config::Config::default().baudrate(BaudRate::Baud9600.into());
@@ -261,7 +260,7 @@ impl<'d> Hc12<'d> {
             &uart_config,
         )?;
 
-        let mut set = PinDriver::output(set)?;
+        let mut set = PinDriver::output(set.into_ref().map_into())?;
         set.set_high()?;
         let last_command_exit = Instant::now();
 
